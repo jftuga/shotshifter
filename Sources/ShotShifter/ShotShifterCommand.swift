@@ -20,6 +20,10 @@ struct ShotShifterCommand: AsyncParsableCommand {
     @Flag(name: .shortAndLong, help: "Overwrite an output file that already exists.")
     var force = false
 
+    /// Whether to leave a file unwritten when shifting it produces any warning.
+    @Flag(name: .long, help: "Do not write an output that has any warning; such files count as not written.")
+    var strict = false
+
     /// Whether to print the version text and exit.
     @Flag(name: .shortAndLong, help: "Print the version and exit.")
     var version = false
@@ -48,7 +52,7 @@ struct ShotShifterCommand: AsyncParsableCommand {
         guard let shift else {
             throw ValidationError("Missing expected argument '--shift <offset>'")
         }
-        let status = await BatchProcessor(offset: shift, force: force).run(files)
+        let status = await BatchProcessor(offset: shift, force: force, strict: strict).run(files)
         if status != 0 {
             throw ExitCode(status)
         }

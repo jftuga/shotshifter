@@ -36,7 +36,7 @@ make install PREFIX=$HOME/.local
 ## Usage
 
 ```
-shotshifter --shift <offset> [--force] <file> [<file> ...]
+shotshifter --shift <offset> [--force] [--strict] <file> [<file> ...]
 shotshifter --version
 shotshifter --help
 ```
@@ -45,10 +45,11 @@ shotshifter --help
 | --- | --- |
 | `-s`, `--shift <offset>` | The amount to add to every X-axis time, as `[+\|-]H[:MM]`: hours 0-26, optional minutes 00-59. Zero is not allowed. |
 | `-f`, `--force` | Overwrite an output file that already exists. |
+| `--strict` | Do not write an output when shifting it produced any warning. The file counts as not written, so the exit status is 1. |
 | `-v`, `--version` | Print the version and exit. |
 | `-h`, `--help` | Show help. |
 
-The output is written beside each input with `-shifted` before the extension: `graph1.png` becomes `graph1-shifted.png`. An existing output is skipped with a warning unless `-f` is given.
+The output is written beside each input with `-shifted` before the extension: `graph1.png` becomes `graph1-shifted.png`. An existing output is skipped with a warning unless `-f` is given. Without `--strict`, a file is written even when it has warnings, and only the warnings show that some labels may have been left unchanged; use `--strict` when only outputs without any warning should be produced.
 
 Examples:
 
@@ -78,7 +79,7 @@ Exit status is 0 when every file was written, 1 when any file failed or was skip
 
 Times are 24-hour. Month and day may also be written without zero padding (`3/14 20:00`, as older Grafana versions draw them); a row written that way stays unpadded. A date-only axis gains a time after shifting, because its ticks no longer sit on midnight, unless the shift is a whole number of days.
 
-Every row of labels must be evenly spaced in time and in pixels, which is how Grafana draws axes. Several panels stacked or side by side are handled; each axis is detected separately. Labels that do not belong to a recognized axis are left unchanged with a warning.
+Every row of labels must be evenly spaced in time and in pixels, which is how Grafana draws axes. Several panels stacked or side by side are handled; each axis is detected separately. A label that breaks the even spacing of its neighbors is treated as misread. Misread labels, labels that do not belong to a recognized axis, and labels that fit an axis but were read together with other text are all left unchanged with a warning.
 
 A time zone label such as `UTC`, `GMT`, `UTC+02:00` or `GMT-5` anywhere in the image is rewritten to match the shifted axis (`UTC` shifted by `-5` becomes `UTC-05:00`). Named zones such as `America/New_York` and abbreviations such as `EST` cannot be rewritten with a fixed offset; they are left unchanged with a warning.
 

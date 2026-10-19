@@ -20,6 +20,8 @@ enum ShotShifterError: Error, CustomStringConvertible, Equatable {
     case renderFailed
     /// The output file already exists and `--force` was not given.
     case outputExists(String)
+    /// `--strict` was given and shifting produced this many warnings.
+    case strictWarnings(Int)
     /// Encoding or moving the output file failed.
     case writeFailed(String)
 
@@ -42,6 +44,8 @@ enum ShotShifterError: Error, CustomStringConvertible, Equatable {
             "cannot create a bitmap to draw the new labels"
         case .outputExists(let path):
             "\(path) exists; use -f to overwrite"
+        case .strictWarnings(let count):
+            "not written because of \(count) warning\(count == 1 ? "" : "s") (--strict)"
         case .writeFailed(let reason):
             "cannot write output: \(reason)"
         }

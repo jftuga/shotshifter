@@ -23,6 +23,8 @@ enum TimeZoneLabelFinder {
         let box: CGRect
         /// The recognition confidence.
         let confidence: Float
+        /// Whether the word was read in a tile pass.
+        let fromTile: Bool
         /// The rewritten word, or `nil` for a warn-only zone.
         let newText: String?
     }
@@ -48,7 +50,7 @@ enum TimeZoneLabelFinder {
                 } else {
                     continue
                 }
-                matches.append(Match(text: word, box: observation.box(for: range), confidence: observation.confidence, newText: newText))
+                matches.append(Match(text: word, box: observation.box(for: range), confidence: observation.confidence, fromTile: observation.fromTile, newText: newText))
             }
         }
         let unique = matches.removingDuplicates()
