@@ -22,13 +22,13 @@ struct TextRecognizer {
     /// - Throws: `ShotShifterError.recognitionFailed` when Vision fails.
     func recognize(_ image: CGImage) async throws -> [TextObservation] {
         let bounds = CGRect(x: 0, y: 0, width: image.width, height: image.height)
-        var observations = try await Self.recognize(image, region: bounds)
+        var observations = try await Self.recognize(image, region: bounds, fromTile: false)
         // Passes run one after another: concurrent text requests crash inside Vision's TextRecognition framework.
         for tile in Self.tiles(width: image.width, height: image.height) {
             guard let cropped = image.cropping(to: tile) else {
                 continue
             }
-            let found = try await Self.recognize(cropped, region: tile)
+            let found = try await Self.recognize(cropped, region: tile, fromTile: true)
             observations += found.filter { !Self.touchesInnerEdge($0.box, of: tile, in: bounds) }
         }
         return observations
@@ -81,9 +81,10 @@ struct TextRecognizer {
     /// - Parameters:
     ///   - image: The image or tile to read.
     ///   - region: Where `image` sits in the whole image, in pixels with a top-left origin.
+    ///   - fromTile: Whether `image` is a tile rather than the whole image.
     /// - Returns: The observations in whole-image pixel coordinates.
     /// - Throws: `ShotShifterError.recognitionFailed` when Vision fails.
-    private static func recognize(_ image: CGImage, region: CGRect) async throws -> [TextObservation] {
+    private static func recognize(_ image: CGImage, region: CGRect, fromTile: Bool) async throws -> [TextObservation] {
         var request = RecognizeTextRequest()
         request.recognitionLevel = .accurate
         request.usesLanguageCorrection = false
@@ -91,7 +92,7 @@ struct TextRecognizer {
         request.minimumTextHeightFraction = 0.005
         do {
             let results = try await request.perform(on: image)
-            return results.compactMap { TextObservation(observation: $0, region: region) }
+            return results.compactMap { TextObservation(observation: $0, region: region, fromTile: fromTile) }
         } catch {
             throw ShotShifterError.recognitionFailed(error.localizedDescription)
         }

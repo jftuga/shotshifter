@@ -35,9 +35,9 @@ struct ImageShifter {
         guard !detection.rows.isEmpty else {
             throw ShotShifterError.noTimeAxis
         }
-        var warnings = detection.unusedLabels
-            .sorted { ($0.box.minY, $0.box.minX) < ($1.box.minY, $1.box.minX) }
-            .map { "label \"\($0.text)\" is not part of a recognized axis and was left unchanged" }
+        let mixedLabels = AxisRowDetector.labelsFittingRows(LabelParser.mixedLabels(in: observations), rows: detection.rows, currentYear: currentYear)
+        var warnings = Self.warnings(for: detection.unusedLabels, reason: "is not part of a recognized axis")
+        warnings += Self.warnings(for: mixedLabels, reason: "was read together with other text")
         var replacements: [LabelReplacement] = []
         for (index, row) in detection.rows.enumerated() {
             for (label, text) in zip(row.labels, LabelShifter.shiftedTexts(for: row, offset: offset)) where text != label.text {
@@ -48,5 +48,16 @@ struct ImageShifter {
         warnings += zones.warnings
         let rendered = try LabelRenderer(imageHeight: image.height).render(image, replacements: replacements + zones.replacements)
         return Result(image: rendered.image, labelCount: detection.rows.reduce(0) { $0 + $1.labels.count }, rowCount: detection.rows.count, warnings: warnings + rendered.warnings)
+    }
+
+    /// One warning per label left unchanged, top to bottom and left to right.
+    /// - Parameters:
+    ///   - labels: The labels left unchanged.
+    ///   - reason: Why they were left unchanged, phrased to follow the label text.
+    /// - Returns: The warnings.
+    private static func warnings(for labels: [AxisLabel], reason: String) -> [String] {
+        labels
+            .sorted { ($0.box.minY, $0.box.minX) < ($1.box.minY, $1.box.minX) }
+            .map { "label \"\($0.text)\" \(reason) and was left unchanged" }
     }
 }

@@ -46,4 +46,6 @@ struct AxisLabel: Sendable, Equatable, RecognizedItem {
     let box: CGRect
     /// Vision's confidence in the observation the label came from.
     let confidence: Float
+    /// Whether the observation the label came from was read in a tile pass.
+    let fromTile: Bool
 }

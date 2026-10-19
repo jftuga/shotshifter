@@ -16,6 +16,9 @@ struct TextObservation: Sendable {
     /// Vision's confidence in the text, from 0 to 1.
     let confidence: Float
 
+    /// Whether the text was read in a tile pass, at full resolution, rather than the whole-image pass.
+    let fromTile: Bool
+
     /// The Vision candidate, used to find substring boxes; `nil` for observations built in code.
     private let candidate: RecognizedText?
 
@@ -26,13 +29,15 @@ struct TextObservation: Sendable {
     /// - Parameters:
     ///   - observation: The Vision observation.
     ///   - region: The pixel rectangle (top-left origin) of the image region Vision ran on.
+    ///   - fromTile: Whether the region is a tile rather than the whole image.
     /// - Returns: `nil` when the observation has no candidate text.
-    init?(observation: RecognizedTextObservation, region: CGRect) {
+    init?(observation: RecognizedTextObservation, region: CGRect, fromTile: Bool) {
         guard let candidate = observation.topCandidates(1).first else {
             return nil
         }
         self.text = candidate.string
         self.confidence = candidate.confidence
+        self.fromTile = fromTile
         self.candidate = candidate
         self.region = region
         self.box = Self.pixelRect(observation.boundingBox, in: region)
@@ -44,10 +49,12 @@ struct TextObservation: Sendable {
     ///   - text: The text.
     ///   - box: The pixel box, top-left origin.
     ///   - confidence: The recognition confidence.
-    init(text: String, box: CGRect, confidence: Float = 1) {
+    ///   - fromTile: Whether the text was read in a tile pass.
+    init(text: String, box: CGRect, confidence: Float = 1, fromTile: Bool = false) {
         self.text = text
         self.box = box
         self.confidence = confidence
+        self.fromTile = fromTile
         self.candidate = nil
         self.region = .zero
     }

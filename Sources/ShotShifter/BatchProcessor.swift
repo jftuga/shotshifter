@@ -1,6 +1,7 @@
 // The batch loop over input files. Files are processed one at a time in the order
 // given; a failure ends only that file. It prints the result line, warnings and errors,
-// and turns the outcome into the process exit status.
+// and turns the outcome into the process exit status. In strict mode a file with any
+// warning is not written.
 
 import Foundation
 
@@ -10,6 +11,8 @@ struct BatchProcessor {
     let offset: TimeOffset
     /// Whether existing outputs are replaced.
     let force: Bool
+    /// Whether a file with any warning is left unwritten.
+    let strict: Bool
 
     /// Processes every file and reports the outcome.
     /// - Parameters:
@@ -38,7 +41,8 @@ struct BatchProcessor {
     /// Shifts one file and writes its output.
     /// - Parameters:
     ///   - path: The input path.
-    /// - Throws: `ShotShifterError.outputExists` when the output exists without `--force`, or any load, pipeline or write error.
+    /// - Throws: `ShotShifterError.outputExists` when the output exists without `--force`, `ShotShifterError.strictWarnings`
+    ///   when there are warnings in strict mode, or any load, pipeline or write error.
     private func process(_ path: String) async throws {
         let outputPath = OutputPath.shifted(path)
         if !force && FileManager.default.fileExists(atPath: outputPath) {
@@ -48,6 +52,9 @@ struct BatchProcessor {
         let result = try await ImageShifter(offset: offset).shift(file.image)
         for warning in result.warnings {
             report("warning", path: path, message: warning)
+        }
+        if strict && !result.warnings.isEmpty {
+            throw ShotShifterError.strictWarnings(result.warnings.count)
         }
         try file.write(result.image, to: outputPath)
         Self.write("\(path) -> \(outputPath) (\(Self.counted(result.labelCount, "label")) in \(Self.counted(result.rowCount, "row")))", to: .standardOutput)

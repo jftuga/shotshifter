@@ -1,12 +1,15 @@
-// An end-to-end test of the whole pipeline on a synthetic dark-theme axis. It draws
-// evenly spaced 20:00-23:00 labels with Core Graphics and Core Text, shifts them by +2
-// hours, and reads the output back with Vision to confirm the new labels are there.
+// End-to-end tests of the whole pipeline on a synthetic dark-theme axis. They draw
+// evenly spaced 20:00-23:00 labels with Core Graphics and Core Text, shift them by +2
+// hours, and read the output back with Vision to confirm the new labels are there; a
+// stray label that produces a warning checks that --strict leaves the file unwritten.
 
 import AppKit
 import CoreGraphics
 import CoreText
 import Foundation
+import ImageIO
 import Testing
+import UniformTypeIdentifiers
 @testable import ShotShifter
 
 /// End-to-end tests for `ImageShifter`.
@@ -17,9 +20,11 @@ struct EndToEndTests {
     private static let height = 400
 
     /// Draws a dark panel with a plot area and four evenly spaced axis labels.
+    /// - Parameters:
+    ///   - strayLabel: Whether to add a lone `14:00` above the plot, which belongs to no axis.
     /// - Returns: The synthetic screenshot.
     /// - Throws: An expectation failure when the bitmap cannot be created.
-    private func makeAxisImage() throws -> CGImage {
+    private func makeAxisImage(strayLabel: Bool = false) throws -> CGImage {
         let space = try #require(CGColorSpace(name: CGColorSpace.sRGB))
         let context = try #require(CGContext(data: nil, width: Self.width, height: Self.height, bitsPerComponent: 8, bytesPerRow: 0, space: space, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
         context.setFillColor(CGColor(srgbRed: 0.07, green: 0.07, blue: 0.09, alpha: 1))
@@ -28,14 +33,29 @@ struct EndToEndTests {
         context.fill(CGRect(x: 80, y: 120, width: Self.width - 120, height: 240))
         let font = NSFont.monospacedDigitSystemFont(ofSize: 28, weight: .regular) as CTFont
         let color = CGColor(srgbRed: 0.8, green: 0.8, blue: 0.86, alpha: 1)
-        for (index, text) in ["20:00", "21:00", "22:00", "23:00"].enumerated() {
-            let attributes: [NSAttributedString.Key: Any] = [NSAttributedString.Key(kCTFontAttributeName as String): font, NSAttributedString.Key(kCTForegroundColorAttributeName as String): color]
+        let attributes: [NSAttributedString.Key: Any] = [NSAttributedString.Key(kCTFontAttributeName as String): font, NSAttributedString.Key(kCTForegroundColorAttributeName as String): color]
+        var texts = ["20:00", "21:00", "22:00", "23:00"].enumerated().map { index, text in (text, CGPoint(x: 260 + CGFloat(index) * 360, y: 70)) }
+        if strayLabel {
+            texts.append(("14:00", CGPoint(x: 260, y: 370)))
+        }
+        for (text, center) in texts {
             let line = CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: attributes))
             let bounds = CTLineGetBoundsWithOptions(line, .useGlyphPathBounds)
-            context.textPosition = CGPoint(x: 260 + CGFloat(index) * 360 - bounds.midX, y: 70)
+            context.textPosition = CGPoint(x: center.x - bounds.midX, y: center.y)
             CTLineDraw(line, context)
         }
         return try #require(context.makeImage())
+    }
+
+    /// Writes an image as a PNG file.
+    /// - Parameters:
+    ///   - image: The image.
+    ///   - url: The file to write.
+    /// - Throws: An expectation failure when the file cannot be written.
+    private func writePNG(_ image: CGImage, to url: URL) throws {
+        let destination = try #require(CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, image, nil)
+        try #require(CGImageDestinationFinalize(destination))
     }
 
     /// Shifting the synthetic axis by +2 hours yields labels that read 22:00, 23:00, 00:00 and 01:00.
@@ -48,5 +68,21 @@ struct EndToEndTests {
             #expect(texts.contains(expected))
         }
         #expect(!texts.contains("20:00") && !texts.contains("21:00"))
+    }
+
+    /// With `--strict` a file whose shift produces a warning is not written and the batch fails;
+    /// without it the same file is written and the batch succeeds.
+    @Test func strictLeavesFilesWithWarningsUnwritten() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let input = directory.appendingPathComponent("axis.png")
+        try writePNG(try makeAxisImage(strayLabel: true), to: input)
+        let output = OutputPath.shifted(input.path)
+        let offset = try TimeOffset(parsing: "+2")
+        #expect(await BatchProcessor(offset: offset, force: false, strict: true).run([input.path]) == 1)
+        #expect(!FileManager.default.fileExists(atPath: output))
+        #expect(await BatchProcessor(offset: offset, force: false, strict: false).run([input.path]) == 0)
+        #expect(FileManager.default.fileExists(atPath: output))
     }
 }

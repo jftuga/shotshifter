@@ -15,9 +15,10 @@ enum TestSupport {
     ///   - text: The recognized text.
     ///   - x: The left edge in pixels.
     ///   - y: The top edge in pixels.
+    ///   - fromTile: Whether the text was read in a tile pass.
     /// - Returns: The observation.
-    static func observation(_ text: String, x: CGFloat, y: CGFloat = 500) -> TextObservation {
-        TextObservation(text: text, box: CGRect(x: x, y: y, width: CGFloat(text.count) * 10, height: 20))
+    static func observation(_ text: String, x: CGFloat, y: CGFloat = 500, fromTile: Bool = false) -> TextObservation {
+        TextObservation(text: text, box: CGRect(x: x, y: y, width: CGFloat(text.count) * 10, height: 20), fromTile: fromTile)
     }
 
     /// Parses evenly spaced labels on one line, one observation per label.
