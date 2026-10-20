@@ -17,12 +17,14 @@ struct LabelRenderer {
     /// Time zone words use only this fraction left and right, so neighboring words in the same line survive.
     static let timeZoneSidePadding: CGFloat = 0.10
 
-    /// The rendered image and any warnings.
+    /// The rendered image, where new labels were drawn, and any warnings.
     struct Result {
         /// The new image.
         let image: CGImage
+        /// The glyph bounds of every new label drawn, top-left origin.
+        let drawnBoxes: [CGRect]
         /// Warnings about labels that may overlap or could not be measured.
-        let warnings: [String]
+        let warnings: [ShiftWarning]
     }
 
     /// A replacement together with what was measured about the original label.
@@ -75,7 +77,7 @@ struct LabelRenderer {
     /// - Parameters:
     ///   - image: The original image.
     ///   - replacements: The labels to replace.
-    /// - Returns: The new image and any warnings.
+    /// - Returns: The new image, where new labels were drawn, and any warnings.
     /// - Throws: `ShotShifterError.renderFailed` when a bitmap cannot be created.
     func render(_ image: CGImage, replacements: [LabelReplacement]) throws -> Result {
         let context = try Self.makeContext(for: image)
@@ -84,14 +86,14 @@ struct LabelRenderer {
         guard let sampler = PixelSampler(context: context) else {
             throw ShotShifterError.renderFailed
         }
-        var warnings: [String] = []
+        var warnings: [ShiftWarning] = []
         var measured: [Measured] = []
         for replacement in replacements {
             let sidePadding = replacement.placement == .timeZone ? Self.timeZoneSidePadding : Self.padding
             let box = replacement.box
             let measureRect = Self.clipped(box.insetBy(dx: -box.height * sidePadding, dy: -box.height * Self.padding), around: replacement, among: replacements)
             guard let measurement = sampler.measure(in: measureRect, core: box, sidePadding: sidePadding, verticalPadding: Self.padding) else {
-                warnings.append("label \"\(replacement.oldText)\" could not be measured and was left unchanged")
+                warnings.append(ShiftWarning(message: "label \"\(replacement.oldText)\" could not be measured and was left unchanged", boxes: [box]))
                 continue
             }
             measured.append(Measured(replacement: replacement, measurement: measurement))
@@ -110,7 +112,7 @@ struct LabelRenderer {
         guard let output = context.makeImage() else {
             throw ShotShifterError.renderFailed
         }
-        return Result(image: output, warnings: warnings)
+        return Result(image: output, drawnBoxes: layouts.map(\.drawnRect), warnings: warnings)
     }
 
     /// Creates an 8-bit RGBA bitmap the size of the image, in its color space (sRGB if it has none or a non-RGB one),
@@ -119,7 +121,7 @@ struct LabelRenderer {
     ///   - image: The source image.
     /// - Returns: The bitmap context.
     /// - Throws: `ShotShifterError.renderFailed` when the context cannot be created.
-    private static func makeContext(for image: CGImage) throws -> CGContext {
+    static func makeContext(for image: CGImage) throws -> CGContext {
         let opaque: Set<CGImageAlphaInfo> = [.none, .noneSkipFirst, .noneSkipLast]
         let alphaInfo: CGImageAlphaInfo = opaque.contains(image.alphaInfo) ? .noneSkipLast : .premultipliedLast
         let space = image.colorSpace.flatMap { $0.model == .rgb ? $0 : nil } ?? CGColorSpace(name: CGColorSpace.sRGB)
@@ -263,15 +265,15 @@ struct LabelRenderer {
     /// its ink height on each side, and a time zone word should be no wider than the one it replaces.
     /// - Parameters:
     ///   - layouts: All layouts.
-    /// - Returns: One warning per label that may overlap.
-    private static func fitWarnings(_ layouts: [Layout]) -> [String] {
-        var warnings: [String] = []
+    /// - Returns: One warning per label that may overlap, at its new glyph bounds.
+    private static func fitWarnings(_ layouts: [Layout]) -> [ShiftWarning] {
+        var warnings: [ShiftWarning] = []
         for layout in layouts {
             let ink = layout.measurement.inkBounds
             switch layout.replacement.placement {
             case .timeZone:
                 if layout.drawnRect.width > ink.width {
-                    warnings.append("time zone label \"\(layout.replacement.newText)\" may overlap the text after it")
+                    warnings.append(ShiftWarning(message: "time zone label \"\(layout.replacement.newText)\" may overlap the text after it", boxes: [layout.drawnRect]))
                 }
             case .axis:
                 let row = layouts.filter { $0.replacement.placement == layout.replacement.placement }.sorted { $0.drawnRect.midX < $1.drawnRect.midX }
@@ -281,7 +283,7 @@ struct LabelRenderer {
                 let widened = layout.drawnRect.insetBy(dx: -ink.height / 2, dy: 0)
                 let neighbors = [index - 1, index + 1].filter { row.indices.contains($0) }.map { row[$0].drawnRect }
                 if neighbors.contains(where: { $0.minX < widened.maxX && widened.minX < $0.maxX }) {
-                    warnings.append("label \"\(layout.replacement.newText)\" may overlap its neighbor")
+                    warnings.append(ShiftWarning(message: "label \"\(layout.replacement.newText)\" may overlap its neighbor", boxes: [layout.drawnRect]))
                 }
             }
         }

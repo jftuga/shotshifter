@@ -11,8 +11,8 @@ enum TimeZoneLabelFinder {
     struct Result: Sendable, Equatable {
         /// UTC/GMT words to redraw.
         let replacements: [LabelReplacement]
-        /// One warning per distinct zone word that is left unchanged.
-        let warnings: [String]
+        /// One warning per distinct zone word that is left unchanged, with every place the word appears.
+        let warnings: [ShiftWarning]
     }
 
     /// One time zone word found in the image.
@@ -57,10 +57,10 @@ enum TimeZoneLabelFinder {
         let replacements = unique.compactMap { match in
             match.newText.map { LabelReplacement(box: match.box, oldText: match.text, newText: $0, placement: .timeZone) }
         }
+        let warnOnly = unique.filter { $0.newText == nil }
         var warned: Set<String> = []
-        var warnings: [String] = []
-        for match in unique where match.newText == nil && warned.insert(match.text).inserted {
-            warnings.append("time zone label \"\(match.text)\" was not rewritten and no longer matches the shifted axis")
+        let warnings = warnOnly.filter { warned.insert($0.text).inserted }.map { first in
+            ShiftWarning(message: "time zone label \"\(first.text)\" was not rewritten and no longer matches the shifted axis", boxes: warnOnly.filter { $0.text == first.text }.map(\.box))
         }
         return Result(replacements: replacements, warnings: warnings)
     }

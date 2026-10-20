@@ -1,5 +1,6 @@
 // Tests for time zone labels: the rewrite table from the specification, word splitting
-// on punctuation, warn-only zones, and the one-warning-per-zone rule.
+// on punctuation, warn-only zones, and the one-warning-per-zone rule with every place
+// the zone appears.
 
 import Testing
 @testable import ShotShifter
@@ -34,16 +35,18 @@ struct TimeZoneLabelFinderTests {
         #expect(replacement.box.minX == 140 && replacement.box.width == 30)
     }
 
-    /// Named zones and abbreviations only warn, once per distinct word.
+    /// Named zones and abbreviations only warn, once per distinct word, with a box for each place it appears.
     @Test func warnsForOtherZones() throws {
         let observations = [TestSupport.observation("EST | America/New_York", x: 0), TestSupport.observation("EST", x: 0, y: 900)]
         let result = TimeZoneLabelFinder.find(in: observations, offset: try TimeOffset(parsing: "+1"))
         #expect(result.replacements.isEmpty)
         #expect(result.warnings.count == 2)
-        #expect(Set(result.warnings) == [
+        #expect(Set(result.warnings.map(\.message)) == [
             "time zone label \"America/New_York\" was not rewritten and no longer matches the shifted axis",
             "time zone label \"EST\" was not rewritten and no longer matches the shifted axis",
         ])
+        let est = try #require(result.warnings.first { $0.message.contains("\"EST\"") })
+        #expect(est.boxes.map(\.minY).sorted() == [500, 900])
     }
 
     /// Words that are not zones, or malformed UTC offsets, are ignored.
