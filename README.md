@@ -46,3 +46,20 @@ Offsets are fixed and do not account for daylight saving changes. Times must use
 - [Usage reference](docs/usage.md) — all options, review outlines, warnings, and exit codes.
 - [Supported formats and limitations](docs/formats-and-limitations.md) — date and time labels, time zones, and image processing.
 - [Why macOS only](docs/why-macos-only.md) — the Apple frameworks ShotShifter depends on and what an open-source port would involve.
+
+## Personal Project Disclosure
+
+This program is my own original idea, conceived and developed entirely:
+
+* On my own personal time, outside of work hours
+* For my own personal benefit and use
+* On my personally owned equipment
+* Without using any employer resources, proprietary information, or trade secrets
+* Without any connection to my employer's business, products, or services
+* Independent of any duties or responsibilities of my employment
+
+This project does not relate to my employer's actual or demonstrably
+anticipated research, development, or business activities. No
+confidential or proprietary information from any employer was used
+in its creation.
+
