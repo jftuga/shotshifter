@@ -1,6 +1,7 @@
 // The processing pipeline for one image: recognize text, parse labels, find axis rows,
-// shift them, find time zone words, and redraw. It works on an in-memory image and
-// returns the new image with counts and warnings; file handling lives elsewhere.
+// shift them, find time zone words, redraw, and optionally outline what was handled and
+// what was warned about. It works on an in-memory image and returns the new image with
+// counts and warnings; file handling lives elsewhere.
 
 import CoreGraphics
 import Foundation
@@ -16,11 +17,13 @@ struct ImageShifter {
         /// The number of valid rows.
         let rowCount: Int
         /// Warnings to report for this file.
-        let warnings: [String]
+        let warnings: [ShiftWarning]
     }
 
     /// The amount to add to every label.
     let offset: TimeOffset
+    /// Whether to outline handled labels in green and warnings in red.
+    let drawsBoxes: Bool
 
     /// Runs the pipeline on one image.
     /// - Parameters:
@@ -39,15 +42,22 @@ struct ImageShifter {
         var warnings = Self.warnings(for: detection.unusedLabels, reason: "is not part of a recognized axis")
         warnings += Self.warnings(for: mixedLabels, reason: "was read together with other text")
         var replacements: [LabelReplacement] = []
+        var unchangedBoxes: [CGRect] = []
         for (index, row) in detection.rows.enumerated() {
-            for (label, text) in zip(row.labels, LabelShifter.shiftedTexts(for: row, offset: offset)) where text != label.text {
-                replacements.append(LabelReplacement(box: label.box, oldText: label.text, newText: text, placement: .axis(row: index)))
+            for (label, text) in zip(row.labels, LabelShifter.shiftedTexts(for: row, offset: offset)) {
+                if text == label.text {
+                    unchangedBoxes.append(label.box)
+                } else {
+                    replacements.append(LabelReplacement(box: label.box, oldText: label.text, newText: text, placement: .axis(row: index)))
+                }
             }
         }
         let zones = TimeZoneLabelFinder.find(in: observations, offset: offset)
         warnings += zones.warnings
         let rendered = try LabelRenderer(imageHeight: image.height).render(image, replacements: replacements + zones.replacements)
-        return Result(image: rendered.image, labelCount: detection.rows.reduce(0) { $0 + $1.labels.count }, rowCount: detection.rows.count, warnings: warnings + rendered.warnings)
+        warnings += rendered.warnings
+        let output = try drawsBoxes ? BoxMarker.mark(rendered.image, handled: rendered.drawnBoxes + unchangedBoxes, warned: warnings.flatMap(\.boxes)) : rendered.image
+        return Result(image: output, labelCount: detection.rows.reduce(0) { $0 + $1.labels.count }, rowCount: detection.rows.count, warnings: warnings)
     }
 
     /// One warning per label left unchanged, top to bottom and left to right.
@@ -55,9 +65,9 @@ struct ImageShifter {
     ///   - labels: The labels left unchanged.
     ///   - reason: Why they were left unchanged, phrased to follow the label text.
     /// - Returns: The warnings.
-    private static func warnings(for labels: [AxisLabel], reason: String) -> [String] {
+    private static func warnings(for labels: [AxisLabel], reason: String) -> [ShiftWarning] {
         labels
             .sorted { ($0.box.minY, $0.box.minX) < ($1.box.minY, $1.box.minX) }
-            .map { "label \"\($0.text)\" \(reason) and was left unchanged" }
+            .map { ShiftWarning(message: "label \"\($0.text)\" \(reason) and was left unchanged", boxes: [$0.box]) }
     }
 }

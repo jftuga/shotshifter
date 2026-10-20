@@ -1,7 +1,8 @@
 // End-to-end tests of the whole pipeline on a synthetic dark-theme axis. They draw
 // evenly spaced 20:00-23:00 labels with Core Graphics and Core Text, shift them by +2
 // hours, and read the output back with Vision to confirm the new labels are there; a
-// stray label that produces a warning checks that --strict leaves the file unwritten.
+// stray label that produces a warning checks that --strict leaves the file unwritten
+// and that --box outlines the axis in green and the stray label in red.
 
 import AppKit
 import CoreGraphics
@@ -60,7 +61,7 @@ struct EndToEndTests {
 
     /// Shifting the synthetic axis by +2 hours yields labels that read 22:00, 23:00, 00:00 and 01:00.
     @Test func shiftsSyntheticDarkAxis() async throws {
-        let result = try await ImageShifter(offset: try TimeOffset(parsing: "+2")).shift(try makeAxisImage())
+        let result = try await ImageShifter(offset: try TimeOffset(parsing: "+2"), drawsBoxes: false).shift(try makeAxisImage())
         #expect(result.rowCount == 1 && result.labelCount == 4)
         #expect(result.warnings.isEmpty)
         let texts = try await TextRecognizer().recognize(result.image).flatMap { $0.text.split(separator: " ").map(String.init) }
@@ -80,9 +81,29 @@ struct EndToEndTests {
         try writePNG(try makeAxisImage(strayLabel: true), to: input)
         let output = OutputPath.shifted(input.path)
         let offset = try TimeOffset(parsing: "+2")
-        #expect(await BatchProcessor(offset: offset, force: false, strict: true).run([input.path]) == 1)
+        #expect(await BatchProcessor(offset: offset, force: false, strict: true, box: false).run([input.path]) == 1)
         #expect(!FileManager.default.fileExists(atPath: output))
-        #expect(await BatchProcessor(offset: offset, force: false, strict: false).run([input.path]) == 0)
+        #expect(await BatchProcessor(offset: offset, force: false, strict: false, box: false).run([input.path]) == 0)
         #expect(FileManager.default.fileExists(atPath: output))
+    }
+
+    /// With boxes on, green outlines appear only around the axis and red ones only around the stray label
+    /// above the plot; with boxes off, neither color appears.
+    @Test func boxesOutlineHandledAndWarnedLabels() async throws {
+        let image = try makeAxisImage(strayLabel: true)
+        let offset = try TimeOffset(parsing: "+2")
+        let boxed = try await ImageShifter(offset: offset, drawsBoxes: true).shift(image)
+        let rows = try TestSupport.outlineRows(in: boxed.image)
+        #expect(!rows.green.isEmpty && rows.green.allSatisfy { $0 > 250 })
+        #expect(!rows.red.isEmpty && rows.red.allSatisfy { $0 < 120 })
+        let plain = try TestSupport.outlineRows(in: try await ImageShifter(offset: offset, drawsBoxes: false).shift(image).image)
+        #expect(plain.green.isEmpty && plain.red.isEmpty)
+    }
+
+    /// `--box` is rejected together with `--strict`, which never writes a file that could carry red outlines.
+    @Test func boxConflictsWithStrict() {
+        #expect(throws: (any Error).self) {
+            try ShotShifterCommand.parseAsRoot(["--box", "--strict", "-s", "+2", "axis.png"])
+        }
     }
 }

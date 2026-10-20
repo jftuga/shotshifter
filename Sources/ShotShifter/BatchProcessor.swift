@@ -1,18 +1,42 @@
 // The batch loop over input files. Files are processed one at a time in the order
 // given; a failure ends only that file. It prints the result line, warnings and errors,
 // and turns the outcome into the process exit status. In strict mode a file with any
-// warning is not written.
+// warning is not written; in box mode outputs carry review outlines. When standard error
+// is a terminal, warnings are printed in yellow and errors in red.
 
 import Foundation
 
 /// Processes a list of image files with one offset.
 struct BatchProcessor {
+    /// The kind of a message printed for one file.
+    enum Level: String {
+        /// A file was written with a problem, or was skipped.
+        case warning
+        /// A file could not be processed.
+        case error
+
+        /// The ANSI escape sequence that colors the message: yellow for warnings, red for errors.
+        var color: String {
+            switch self {
+            case .warning: "\u{1B}[33m"
+            case .error: "\u{1B}[31m"
+            }
+        }
+    }
+
+    /// The ANSI escape sequence that restores the default color.
+    private static let resetColor = "\u{1B}[0m"
+    /// Whether standard error is a terminal, so messages may be colored.
+    private static let colorsMessages = isatty(STDERR_FILENO) != 0
+
     /// The amount to add to every label.
     let offset: TimeOffset
     /// Whether existing outputs are replaced.
     let force: Bool
     /// Whether a file with any warning is left unwritten.
     let strict: Bool
+    /// Whether outputs outline handled labels in green and warnings in red.
+    let box: Bool
 
     /// Processes every file and reports the outcome.
     /// - Parameters:
@@ -24,10 +48,10 @@ struct BatchProcessor {
             do {
                 try await process(path)
             } catch ShotShifterError.outputExists(let output) {
-                report("warning", path: path, message: ShotShifterError.outputExists(output).description)
+                report(.warning, path: path, message: ShotShifterError.outputExists(output).description)
                 failures += 1
             } catch {
-                report("error", path: path, message: "\(error)")
+                report(.error, path: path, message: "\(error)")
                 failures += 1
             }
         }
@@ -49,9 +73,9 @@ struct BatchProcessor {
             throw ShotShifterError.outputExists(outputPath)
         }
         let file = try ImageFile.load(path: path)
-        let result = try await ImageShifter(offset: offset).shift(file.image)
+        let result = try await ImageShifter(offset: offset, drawsBoxes: box).shift(file.image)
         for warning in result.warnings {
-            report("warning", path: path, message: warning)
+            report(.warning, path: path, message: warning.message)
         }
         if strict && !result.warnings.isEmpty {
             throw ShotShifterError.strictWarnings(result.warnings.count)
@@ -60,13 +84,14 @@ struct BatchProcessor {
         Self.write("\(path) -> \(outputPath) (\(Self.counted(result.labelCount, "label")) in \(Self.counted(result.rowCount, "row")))", to: .standardOutput)
     }
 
-    /// Prints a warning or error line for one file to standard error.
+    /// Prints a warning or error line for one file to standard error, colored when standard error is a terminal.
     /// - Parameters:
-    ///   - level: `warning` or `error`.
+    ///   - level: Whether the line is a warning or an error.
     ///   - path: The input path.
     ///   - message: The message.
-    private func report(_ level: String, path: String, message: String) {
-        Self.write("\(level): \(path): \(message)", to: .standardError)
+    private func report(_ level: Level, path: String, message: String) {
+        let line = "\(level.rawValue): \(path): \(message)"
+        Self.write(Self.colorsMessages ? level.color + line + Self.resetColor : line, to: .standardError)
     }
 
     /// Writes one line, unbuffered, so results and messages appear in the order files are processed.
