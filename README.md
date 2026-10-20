@@ -45,3 +45,4 @@ Offsets are fixed and do not account for daylight saving changes. Times must use
 - [Installation](docs/installation.md) — Homebrew, release downloads, and building from source.
 - [Usage reference](docs/usage.md) — all options, review outlines, warnings, and exit codes.
 - [Supported formats and limitations](docs/formats-and-limitations.md) — date and time labels, time zones, and image processing.
+- [Why macOS only](docs/why-macos-only.md) — the Apple frameworks ShotShifter depends on and what an open-source port would involve.
