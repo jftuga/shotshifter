@@ -13,7 +13,15 @@ It targets Grafana first but does not depend on it: any screenshot whose X-axis 
 
 ## Install
 
-Build the release binary as your own user first:
+With Homebrew:
+
+```
+brew install jftuga/tap/shotshifter
+```
+
+Release tarballs with SHA-256 checksums are also on the [releases page](https://github.com/jftuga/shotshifter/releases). The binary is not notarized, so if the tarball was downloaded with a browser, clear the quarantine flag before running it: `xattr -d com.apple.quarantine shotshifter`.
+
+To build from source, build the release binary as your own user first:
 
 ```
 make release

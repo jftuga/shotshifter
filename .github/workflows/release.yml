@@ -1,0 +1,141 @@
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  APP_NAME: shotshifter
+
+jobs:
+  build:
+    # The package needs Swift 6.2 (Xcode 26) and targets macOS 26, so the built
+    # binary only runs there; pin the runner instead of following macos-latest.
+    runs-on: macos-26
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Build
+        run: |
+          make release
+          echo "BIN_PATH=$(swift build -c release --arch arm64 --show-bin-path)/${APP_NAME}" >> "$GITHUB_ENV"
+
+      - name: Verify binary
+        run: '"${BIN_PATH}" --version'
+
+      # Runs before the tests so a mistagged release fails in seconds.
+      - name: Check version matches tag
+        if: github.ref_type == 'tag'
+        run: |
+          # The first line of --version is "ShotShifter v0.2.0"; keep the last word.
+          BINARY_VERSION="$("${BIN_PATH}" --version | head -1)"
+          BINARY_VERSION="${BINARY_VERSION##* }"
+          if [ "$BINARY_VERSION" != "$GITHUB_REF_NAME" ]; then
+            echo "tag ${GITHUB_REF_NAME} does not match the built version ${BINARY_VERSION}; update Sources/ShotShifter/AppInfo.swift" >&2
+            exit 1
+          fi
+
+      - name: Test
+        run: make test
+
+      - name: Get version
+        id: version
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${GITHUB_SHA::8}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create tarball
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          DIR="${APP_NAME}_${VERSION}"
+          mkdir "$DIR"
+          cp "${BIN_PATH}" LICENSE README.md "$DIR/"
+          tar -cJf "${DIR}.tar.xz" "$DIR"
+          shasum -a 256 "${DIR}.tar.xz" > "${DIR}.tar.xz.sha256"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2.6.1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            ${{ env.APP_NAME }}_${{ steps.version.outputs.version }}.tar.xz
+            ${{ env.APP_NAME }}_${{ steps.version.outputs.version }}.tar.xz.sha256
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+
+      - name: Write Homebrew formula
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          TARBALL="${APP_NAME}_${GITHUB_REF_NAME}.tar.xz"
+          SHA256=$(shasum -a 256 "$TARBALL" | awk '{print $1}')
+          URL="https://github.com/jftuga/${APP_NAME}/releases/download/${GITHUB_REF_NAME}/${TARBALL}"
+
+          # Written straight to a file so it keeps the final newline "brew style" requires.
+          cat > "${APP_NAME}.rb" <<EOFORMULA
+          # typed: true
+          # frozen_string_literal: true
+
+          # Homebrew formula for the shotshifter command-line tool.
+          class Shotshifter < Formula
+            desc "Shift the time axis of dashboard screenshots to another time zone"
+            homepage "https://github.com/jftuga/${APP_NAME}"
+            url "${URL}"
+            sha256 "${SHA256}"
+            license "MIT"
+
+            depends_on arch: :arm64
+            depends_on macos: :tahoe
+
+            def install
+              bin.install "${APP_NAME}"
+            end
+
+            test do
+              assert_match version.to_s, shell_output("#{bin}/${APP_NAME} --version")
+            end
+          end
+          EOFORMULA
+
+          cat "${APP_NAME}.rb"
+
+      - name: Check Homebrew formula
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          # Install from a throwaway local tap, so the published asset, its checksum
+          # and the formula's test block are all exercised before the real tap changes.
+          brew tap-new --no-git jftuga/release-check
+          cp "${APP_NAME}.rb" "$(brew --repository jftuga/release-check)/Formula/"
+          brew style "jftuga/release-check/${APP_NAME}"
+          brew audit --strict "jftuga/release-check/${APP_NAME}"
+          brew install "jftuga/release-check/${APP_NAME}"
+          brew test "jftuga/release-check/${APP_NAME}"
+
+      - name: Update Homebrew tap
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TOKEN }}
+        run: |
+          TAP_FILE="repos/jftuga/homebrew-tap/contents/${APP_NAME}.rb"
+          ARGS=(-X PUT "$TAP_FILE"
+            -f message="Update ${APP_NAME} to ${GITHUB_REF_NAME#v}"
+            -f content="$(base64 -i "${APP_NAME}.rb")")
+
+          # Replacing an existing file needs its blob SHA; a failed lookup means
+          # this is the first release in the tap.
+          if EXISTING_SHA=$(gh api "$TAP_FILE" --jq .sha 2>/dev/null); then
+            ARGS+=(-f sha="$EXISTING_SHA")
+          fi
+
+          gh api "${ARGS[@]}" --jq .commit.html_url
